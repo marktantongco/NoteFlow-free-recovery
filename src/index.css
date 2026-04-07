@@ -1,0 +1,149 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  /* Default Emerald */
+  --color-primary-50: #ecfdf5;
+  --color-primary-100: #d1fae5;
+  --color-primary-200: #a7f3d0;
+  --color-primary-300: #6ee7b7;
+  --color-primary-400: #34d399;
+  --color-primary-500: #10b981;
+  --color-primary-600: #059669;
+  --color-primary-700: #047857;
+  --color-primary-800: #065f46;
+  --color-primary-900: #064e3b;
+}
+
+:root[data-theme="indigo"] {
+  --color-primary-50: #eef2ff;
+  --color-primary-100: #e0e7ff;
+  --color-primary-200: #c7d2fe;
+  --color-primary-300: #a5b4fc;
+  --color-primary-400: #818cf8;
+  --color-primary-500: #6366f1;
+  --color-primary-600: #4f46e5;
+  --color-primary-700: #4338ca;
+  --color-primary-800: #3730a3;
+  --color-primary-900: #312e81;
+}
+
+:root[data-theme="rose"] {
+  --color-primary-50: #fff1f2;
+  --color-primary-100: #ffe4e6;
+  --color-primary-200: #fecdd3;
+  --color-primary-300: #fda4af;
+  --color-primary-400: #fb7185;
+  --color-primary-500: #f43f5e;
+  --color-primary-600: #e11d48;
+  --color-primary-700: #be123c;
+  --color-primary-800: #9f1239;
+  --color-primary-900: #881337;
+}
+
+:root[data-theme="blue"] {
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+}
+
+:root[data-theme="amber"] {
+  --color-primary-50: #fffbeb;
+  --color-primary-100: #fef3c7;
+  --color-primary-200: #fde68a;
+  --color-primary-300: #fcd34d;
+  --color-primary-400: #fbbf24;
+  --color-primary-500: #f59e0b;
+  --color-primary-600: #d97706;
+  --color-primary-700: #b45309;
+  --color-primary-800: #92400e;
+  --color-primary-900: #78350f;
+}
+
+body {
+  font-family: "Inter", sans-serif;
+}
+
+/* Glassmorphism utilities */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.dark .glass {
+  background: rgba(23, 23, 23, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* High Contrast Mode */
+.high-contrast {
+  --color-primary-50: #000000;
+  --color-primary-100: #000000;
+  --color-primary-200: #000000;
+  --color-primary-300: #ffffff;
+  --color-primary-400: #ffffff;
+  --color-primary-500: #ffff00;
+  --color-primary-600: #ffff00;
+  --color-primary-700: #ffff00;
+  --color-primary-800: #000000;
+  --color-primary-900: #000000;
+  background-color: #000000;
+  color: #ffffff;
+}
+
+.high-contrast * {
+  border-color: #ffffff !important;
+}
+
+.high-contrast .bg-white,
+.high-contrast .bg-neutral-50,
+.high-contrast .bg-neutral-100,
+.high-contrast .bg-neutral-800,
+.high-contrast .bg-neutral-900 {
+  background-color: #000000 !important;
+}
+
+.high-contrast .text-neutral-400,
+.high-contrast .text-neutral-500,
+.high-contrast .text-neutral-600,
+.high-contrast .text-neutral-700,
+.high-contrast .text-neutral-900 {
+  color: #ffffff !important;
+}
+
+/* Markdown prose styling overrides */
+.prose {
+  color: inherit;
+}
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  color: inherit;
+  font-weight: 600;
+}
+.prose a {
+  color: var(--color-primary-500);
+}
+.prose code {
+  color: inherit;
+  background: rgba(0,0,0,0.05);
+  padding: 0.2em 0.4em;
+  border-radius: 0.25rem;
+  font-weight: 500;
+}
+.dark .prose code {
+  background: rgba(255,255,255,0.1);
+}
+
