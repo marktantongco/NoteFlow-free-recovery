@@ -5,6 +5,7 @@ import { LogOut, User as UserIcon, Activity, Book, FileText, BarChart2, Settings
 import { useOfflineStatus } from '../../hooks/useOfflineStatus';
 import { useHabitReminders } from '../../hooks/useHabitReminders';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { GlobalSearch } from './GlobalSearch';
 
 interface LayoutProps {
   children: ReactNode;
@@ -396,6 +397,13 @@ export const Layout = ({ children, activeTab, setActiveTab }: LayoutProps) => {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-4 md:p-8 md:ml-64 pb-24 md:pb-8 relative">
+        <header className="max-w-5xl mx-auto flex items-center justify-between mb-6 md:mb-8 md:flex-row flex-col gap-4">
+            <h2 className="text-xl md:text-2xl font-bold tracking-tight md:hidden selfie-hidden">NoteFlow</h2>
+            <div className="flex-1 w-full md:min-w-0 md:flex md:justify-end">
+                <GlobalSearch onNavigate={(tabId) => setActiveTab(tabId)} />
+            </div>
+        </header>
+
         <motion.div
           key={activeTab}
           initial={{ opacity: 0, y: 10 }}

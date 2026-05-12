@@ -7,6 +7,7 @@ import { Users, MessageCircle, Shield, Send, Lock, Wifi, Heart, MessageSquare, S
 import { formatDistanceToNow, subDays } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
+import { generateKeyPair, exportKey, importKey, deriveSharedKey } from '../../lib/crypto';
 
 interface Message {
   id: string;
@@ -26,6 +27,7 @@ export const SocialTab = () => {
   const [inputMessage, setInputMessage] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const cryptoKeyRef = useRef<CryptoKey | null>(null);
+  const privateKeyRef = useRef<CryptoKey | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Feed State

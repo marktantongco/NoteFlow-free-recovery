@@ -193,3 +193,13 @@ db.version(10).stores({
 });
 
 export { db };
+
+export const pruneOldNoteVersions = async () => {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    await db.noteVersions
+        .where('timestamp')
+        .below(thirtyDaysAgo.toISOString())
+        .delete();
+};

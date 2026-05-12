@@ -29,8 +29,17 @@ vi.mock('@dnd-kit/sortable', () => ({
 
 describe('FolderItem Component', () => {
   it('renders correctly with folder name', () => {
-    const mockFolder = { id: '1', name: 'Test Folder' };
-    render(<FolderItem folder={mockFolder} onRename={vi.fn()} onDelete={vi.fn()} />);
+    const mockFolder = { id: '1', name: 'Test Folder', userId: 'user1', parentId: null, order: 0, createdAt: new Date().toISOString() };
+    const mockChildrenMap = new Map();
+    render(
+      <FolderItem 
+        folder={mockFolder} 
+        subFolders={[]} 
+        childrenMap={mockChildrenMap} 
+        onRename={vi.fn()} 
+        onDelete={vi.fn()} 
+      />
+    );
     expect(screen.getByText('Test Folder')).toBeDefined();
   });
 });
