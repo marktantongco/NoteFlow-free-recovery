@@ -4,8 +4,9 @@ import { db } from '../../lib/db';
 import { useAppContext } from '../../lib/context';
 import { motion } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, Brush, AreaChart, Area, ComposedChart } from 'recharts';
-import { format, subDays, parseISO, eachDayOfInterval, startOfDay, isSameDay } from 'date-fns';
-import { Brain, TrendingUp, AlertTriangle, Calendar, Settings, Eye, EyeOff, Clock, Filter } from 'lucide-react';
+import { format, subDays, parseISO, eachDayOfInterval, startOfDay, isSameDay, differenceInDays } from 'date-fns';
+import { Brain, TrendingUp, AlertTriangle, Calendar, Settings, Eye, EyeOff, Clock, Filter, DollarSign, Activity } from 'lucide-react';
+import { toast } from 'sonner';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -31,8 +32,10 @@ export const AnalyticsTab = () => {
   const [insights, setInsights] = useState<any>(null);
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
   const [timeRange, setTimeRange] = useState(30);
+  const [impactRange, setImpactRange] = useState<'30-days' | 'lifetime'>('30-days');
   const [selectedTrigger, setSelectedTrigger] = useState<string | null>(null);
   const [visibleMetrics, setVisibleMetrics] = useState({
+    overview: true,
     mood: true,
     craving: true,
     habits: true,
@@ -40,6 +43,28 @@ export const AnalyticsTab = () => {
     habitTrend: true
   });
   const [showSettings, setShowSettings] = useState(false);
+
+  // Recovery Baseline Calcs
+  const daysClean = React.useMemo(() => {
+    if (!user?.recoveryStartDate) return 0;
+    const start = new Date(user.recoveryStartDate);
+    const now = new Date();
+    // Prevent negative days
+    return Math.max(0, differenceInDays(now, start));
+  }, [user?.recoveryStartDate]);
+
+  const moneySaved = React.useMemo(() => {
+    if (!user?.dailySpend || daysClean <= 0) return 0;
+    return user.dailySpend * daysClean;
+  }, [user?.dailySpend, daysClean]);
+
+  const biochemicalPhase = React.useMemo(() => {
+    if (daysClean === 0) return "Day 1: Acute phase. Symptoms may be challenging, but your body is beginning the flush.";
+    if (daysClean < 7) return "First Week: Reward circuitry is highly dysregulated, but physical toxins are leaving your system.";
+    if (daysClean < 30) return "Weeks 1-4: Brain fog begins to lift. Dopamine receptors are slowly starting to upregulate.";
+    if (daysClean < 90) return "1-3 Months: Significant neural healing. Executive function and emotional regulation are improving.";
+    return "90+ Days: Major structural brain recovery. Long-term cognitive gains continue to compound.";
+  }, [daysClean]);
 
   const entries = useLiveQuery(
     () => user ? db.entries.where('userId').equals(user.id).toArray() : [],
@@ -85,6 +110,8 @@ export const AnalyticsTab = () => {
       if (response.ok) {
         const data = await response.json();
         setInsights(data);
+      } else if (response.status === 401) {
+         toast.error("Invalid AI API Key. Please check your settings.");
       }
     } catch (error) {
       console.error("Failed to generate insights", error);
@@ -241,6 +268,105 @@ export const AnalyticsTab = () => {
       )}
 
       <div className="grid grid-cols-1 gap-6">
+        {/* Recovery Baseline Overview */}
+        {visibleMetrics.overview && user?.recoveryStartDate && (
+          <motion.div 
+            className="grid grid-cols-1 md:grid-cols-3 gap-4"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="bg-gradient-to-br from-neutral-900 to-neutral-800 dark:from-black dark:to-neutral-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4 opacity-20">
+                <Calendar size={64} />
+              </div>
+              <h3 className="text-neutral-400 font-medium mb-1 text-sm uppercase tracking-wider">Days Clean</h3>
+              <div className="text-4xl font-bold mb-2">{daysClean}</div>
+              <p className="text-sm text-neutral-300">
+                Since {format(parseISO(user.recoveryStartDate), 'MMM do, yyyy')}
+              </p>
+            </div>
+
+            <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4 opacity-20">
+                <DollarSign size={64} />
+              </div>
+              <h3 className="text-emerald-100 font-medium mb-1 text-sm uppercase tracking-wider">Money Saved</h3>
+              <div className="text-4xl font-bold mb-2">
+                {user?.currency === 'USD' ? '$' : user?.currency === 'EUR' ? '€' : user?.currency === 'GBP' ? '£' : '₱'}
+                {moneySaved.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <p className="text-sm text-emerald-100">
+                Based on {user?.dailySpend || 0}/day
+              </p>
+            </div>
+
+            <div className="bg-gradient-to-br from-[var(--color-primary-500)] to-[var(--color-primary-700)] rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4 opacity-20">
+                <Activity size={64} />
+              </div>
+              <h3 className="text-white/80 font-medium mb-2 text-sm uppercase tracking-wider">Biochemical Recovery</h3>
+              <p className="text-sm font-medium leading-relaxed">
+                {biochemicalPhase}
+              </p>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Financial & Time Impact Analytics */}
+        <div className="grid grid-cols-1 gap-6">
+           <div className="flex justify-end mb-2">
+              <div className="bg-white dark:bg-neutral-800 p-1 rounded-xl border border-neutral-200 dark:border-neutral-700 flex items-center">
+                  {(['30-days', 'lifetime'] as const).map((range) => (
+                      <button
+                        key={range}
+                        onClick={() => setImpactRange(range)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          impactRange === range
+                            ? 'bg-[var(--color-primary-100)] text-[var(--color-primary-700)] dark:bg-[var(--color-primary-900)] dark:text-[var(--color-primary-300)]'
+                            : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-300'
+                        }`}
+                      >
+                        {range === '30-days' ? 'Last 30 Days' : 'Lifetime'}
+                      </button>
+                    ))}
+              </div>
+           </div>
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 flex items-center gap-4">
+                 <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-xl text-green-600 dark:text-green-400">
+                   <DollarSign size={24} />
+                 </div>
+                 <div>
+                    <h3 className="text-sm text-neutral-500 font-medium">Financial Impact ({impactRange})</h3>
+                    <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
+                      {user?.currency || 'USD'} {
+                          (habits?.reduce((acc, h) => {
+                             const relevantLogs = habitLogs?.filter(l => l.habitId === h.id && (impactRange === 'lifetime' || new Date(l.date) >= subDays(new Date(), 30))) || [];
+                             return acc + (h.costImpact || 0) * relevantLogs.length;
+                          }, 0) || 0).toFixed(2)
+                      }
+                    </p>
+                 </div>
+              </div>
+              <div className="bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 flex items-center gap-4">
+                 <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-xl text-blue-600 dark:text-neutral-400">
+                   <Clock size={24} />
+                 </div>
+                 <div>
+                    <h3 className="text-sm text-neutral-500 font-medium">Time Impact ({impactRange})</h3>
+                    <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
+                      {
+                          (habits?.reduce((acc, h) => {
+                             const relevantLogs = habitLogs?.filter(l => l.habitId === h.id && (impactRange === 'lifetime' || new Date(l.date) >= subDays(new Date(), 30))) || [];
+                             return acc + (h.timeImpact || 0) * relevantLogs.length;
+                          }, 0) || 0).toFixed(0)
+                      } mins
+                    </p>
+                 </div>
+              </div>
+           </div>
+        </div>
+
         {/* Habit Heatmap & Trend */}
         {(visibleMetrics.habits || visibleMetrics.habitTrend) && (
           <motion.div 

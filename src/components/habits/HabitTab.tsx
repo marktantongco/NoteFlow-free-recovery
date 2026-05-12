@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, CheckCircle2, Circle, Trash2, Trophy, Calendar, Flame, Bell, Brain, Sparkles, X, CheckSquare, Square, Filter, ArrowUpDown, Edit3, Dumbbell, Heart, BookOpen, Briefcase, Coffee, Sun, Moon, Smile, Zap } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { format, subDays, isSameDay, parseISO } from 'date-fns';
+import { checkHabitMilestones } from '../../services/BadgeService';
 
 const CATEGORIES = [
   'Physical Health',
@@ -33,8 +34,11 @@ export const HabitTab = () => {
   const { user } = useAppContext();
   const [showAddHabit, setShowAddHabit] = useState(false);
   const [newHabitTitle, setNewHabitTitle] = useState('');
+  const [newHabitCostImpact, setNewHabitCostImpact] = useState<number>(0);
+  const [newHabitTimeImpact, setNewHabitTimeImpact] = useState<number>(0);
   const [newHabitFreq, setNewHabitFreq] = useState<'daily' | 'weekly'>('daily');
   const [reminderTime, setReminderTime] = useState('');
+  const [reminderDays, setReminderDays] = useState<number[]>([]);
   const [newHabitCategory, setNewHabitCategory] = useState(CATEGORIES[0]);
   const [newHabitIcon, setNewHabitIcon] = useState('default');
   
@@ -109,8 +113,11 @@ export const HabitTab = () => {
       title: newHabitTitle,
       frequency: newHabitFreq,
       reminderTime: reminderTime || undefined,
+      reminderDays: reminderDays.length > 0 ? reminderDays : undefined,
       category: newHabitCategory,
-      icon: newHabitIcon
+      icon: newHabitIcon,
+      costImpact: newHabitCostImpact,
+      timeImpact: newHabitTimeImpact
     };
 
     if (editingHabit) {
@@ -129,6 +136,7 @@ export const HabitTab = () => {
     
     setNewHabitTitle('');
     setReminderTime('');
+    setReminderDays([]);
     setNewHabitFreq('daily');
     setNewHabitCategory(CATEGORIES[0]);
     setNewHabitIcon('default');
@@ -138,8 +146,11 @@ export const HabitTab = () => {
   const startEdit = (habit: Habit) => {
     setEditingHabit(habit);
     setNewHabitTitle(habit.title);
+    setNewHabitCostImpact(habit.costImpact || 0);
+    setNewHabitTimeImpact(habit.timeImpact || 0);
     setNewHabitFreq(habit.frequency);
     setReminderTime(habit.reminderTime || '');
+    setReminderDays(habit.reminderDays || []);
     setNewHabitCategory(habit.category || CATEGORIES[0]);
     setNewHabitIcon(habit.icon || 'default');
     setShowAddHabit(true);
@@ -148,7 +159,10 @@ export const HabitTab = () => {
   const cancelEdit = () => {
     setEditingHabit(null);
     setNewHabitTitle('');
+    setNewHabitCostImpact(0);
+    setNewHabitTimeImpact(0);
     setReminderTime('');
+    setReminderDays([]);
     setNewHabitFreq('daily');
     setNewHabitCategory(CATEGORIES[0]);
     setNewHabitIcon('default');
@@ -198,6 +212,8 @@ export const HabitTab = () => {
         date: today,
         completed: true
       });
+      
+      await checkHabitMilestones(user.id, habitId);
       
       // Gamification: Check streak and award points
       const currentStreak = calculateStreak(habitId);
@@ -465,6 +481,20 @@ export const HabitTab = () => {
                 className="flex-1 px-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 bg-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] outline-none"
                 autoFocus
                 />
+                <input 
+                  type="number"
+                  placeholder="Cost/Impact Value"
+                  value={newHabitCostImpact}
+                  onChange={(e) => setNewHabitCostImpact(Number(e.target.value))}
+                  className="px-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 bg-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] outline-none"
+                />
+                <input 
+                  type="number"
+                  placeholder="Time Impact (mins)"
+                  value={newHabitTimeImpact}
+                  onChange={(e) => setNewHabitTimeImpact(Number(e.target.value))}
+                  className="px-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 bg-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] outline-none"
+                />
                 <select
                 value={newHabitCategory}
                 onChange={(e) => setNewHabitCategory(e.target.value)}
@@ -500,7 +530,7 @@ export const HabitTab = () => {
               })}
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2 text-neutral-500">
                     <Bell size={18} />
                     <input 
@@ -509,6 +539,17 @@ export const HabitTab = () => {
                         onChange={(e) => setReminderTime(e.target.value)}
                         className="px-3 py-1 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent text-sm"
                     />
+                </div>
+                <div className="flex items-center gap-1">
+                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setReminderDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i])}
+                          className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-colors ${reminderDays.includes(i) ? 'bg-[var(--color-primary-500)] text-white' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'}`}
+                        >
+                          {day}
+                        </button>
+                    ))}
                 </div>
                 <div className="flex-1"></div>
                 <button 
@@ -573,7 +614,7 @@ export const HabitTab = () => {
                     <h3 className={`font-semibold text-lg ${isCompleted ? 'text-[var(--color-primary-900)] dark:text-[var(--color-primary-100)] line-through opacity-70' : 'text-neutral-900 dark:text-neutral-100'}`}>
                       {habit.title}
                     </h3>
-                    <div className="flex items-center gap-3 text-xs text-neutral-500">
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
                         <span className="px-2 py-0.5 bg-neutral-100 dark:bg-neutral-700 rounded-full">{habit.category || 'Other'}</span>
                         <span className="capitalize">{habit.frequency}</span>
                         {habit.reminderTime && (
@@ -581,6 +622,13 @@ export const HabitTab = () => {
                                 <Bell size={10} />
                                 {habit.reminderTime}
                             </span>
+                        )}
+                        {habit.reminderDays && habit.reminderDays.length > 0 && (
+                            <div className="flex gap-0.5">
+                              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => habit.reminderDays!.includes(i) && (
+                                <span key={i} className="px-1 py-0.5 bg-[var(--color-primary-100)] text-[var(--color-primary-700)] rounded text-[10px]">{day}</span>
+                              ))}
+                            </div>
                         )}
                     </div>
                   </div>

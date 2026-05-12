@@ -3,9 +3,10 @@ import { useAppContext } from '../../lib/context';
 import { db, SocialPost } from '../../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, MessageCircle, Shield, Send, Lock, Wifi, Heart, MessageSquare, Share2, MoreHorizontal, Hash, Filter, X } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { Users, MessageCircle, Shield, Send, Lock, Wifi, Heart, MessageSquare, Share2, MoreHorizontal, Hash, Filter, X, Search, Calendar, User as UserIcon } from 'lucide-react';
+import { formatDistanceToNow, subDays } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
+import { toast } from 'sonner';
 
 interface Message {
   id: string;
@@ -17,14 +18,14 @@ interface Message {
 
 export const SocialTab = () => {
   const { user } = useAppContext();
-  const [activeView, setActiveView] = useState<'feed' | 'chat'>('feed');
+  const [activeView, setActiveView] = useState<'feed' | 'chat' | 'profile'>('feed');
+  const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
   const [roomId, setRoomId] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const cryptoKeyRef = useRef<CryptoKey | null>(null);
-  const privateKeyRef = useRef<CryptoKey | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Feed State
@@ -34,10 +35,63 @@ export const SocialTab = () => {
   const [expandedPostId, setExpandedPostId] = useState<string | null>(null);
   const [commentContent, setCommentContent] = useState('');
 
+  // Group chat state
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  const [selectedBuddies, setSelectedBuddies] = useState<string[]>([]);
+  
+  // Share state
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [sharePassword, setSharePassword] = useState('');
+  const [selectedSharePostId, setSelectedSharePostId] = useState<string | null>(null);
+
+  const generatePostShareLink = () => {
+    if (!selectedSharePostId) return;
+    const baseUrl = window.location.origin;
+    let shareUrl = `${baseUrl}/share/post/${selectedSharePostId}`;
+    if (sharePassword) {
+      shareUrl += `?protected=true`;
+    }
+    navigator.clipboard.writeText(shareUrl);
+    toast.success(`Link copied to clipboard!\n${sharePassword ? '(Password protected)' : '(Public link)'}`);
+    setShowShareModal(false);
+    setSelectedSharePostId(null);
+    setSharePassword('');
+  };
+
+  const uniqueUsers = useLiveQuery(async () => {
+    if (!user) return [];
+    const allPosts = await db.posts.toArray();
+    const usersMap = new Map();
+    allPosts.forEach(p => {
+      if (p.userId !== user.id) {
+        usersMap.set(p.userId, { id: p.userId, name: p.authorName, avatar: p.authorName.charAt(0) });
+      }
+    });
+    return Array.from(usersMap.values());
+  }, [user]);
+
+  const toggleBuddySelection = (id: string) => {
+    setSelectedBuddies(prev => 
+      prev.includes(id) ? prev.filter(b => b !== id) : 
+      prev.length < 4 ? [...prev, id] : prev
+    );
+  };
+
+  const createGroupChannel = () => {
+    if (selectedBuddies.length === 0) return;
+    const newRoomId = `group_${uuidv4().slice(0, 8)}`;
+    setRoomId(newRoomId);
+    setIsCreatingGroup(false);
+    setSelectedBuddies([]);
+    joinRoom(newRoomId); // automatically join
+  };
+
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [showMyPostsOnly, setShowMyPostsOnly] = useState(false);
   const [showFollowingOnly, setShowFollowingOnly] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [dateFilter, setDateFilter] = useState('all');
 
   const { updateUser } = useAppContext();
 
@@ -56,10 +110,21 @@ export const SocialTab = () => {
       if (activeTag) {
         collection = collection.filter(p => p.tags && p.tags.includes(activeTag));
       }
+
+      if (searchKeyword) {
+        const lowerKeyword = searchKeyword.toLowerCase();
+        collection = collection.filter(p => p.content.toLowerCase().includes(lowerKeyword));
+      }
+
+      if (dateFilter === '7days') {
+        collection = collection.filter(p => new Date(p.createdAt) >= subDays(new Date(), 7));
+      } else if (dateFilter === '30days') {
+        collection = collection.filter(p => new Date(p.createdAt) >= subDays(new Date(), 30));
+      }
       
       return collection;
     },
-    [activeTag, showMyPostsOnly, showFollowingOnly, selectedUserId, user?.id, user?.following]
+    [activeTag, showMyPostsOnly, showFollowingOnly, selectedUserId, user?.id, user?.following, searchKeyword, dateFilter]
   );
 
   const trendingTags = useLiveQuery(async () => {
@@ -129,46 +194,24 @@ export const SocialTab = () => {
     }
   }, [messages]);
 
-  const generateKeyPair = async () => {
-    return window.crypto.subtle.generateKey(
-      {
-        name: "ECDH",
-        namedCurve: "P-256",
-      },
-      true,
-      ["deriveKey", "deriveBits"]
+  const getAESEncryptionKey = async (secret: string) => {
+    const encoder = new TextEncoder();
+    const keyMaterial = await window.crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      { name: "PBKDF2" },
+      false,
+      ["deriveBits", "deriveKey"]
     );
-  };
-
-  const exportKey = async (key: CryptoKey) => {
-    const exported = await window.crypto.subtle.exportKey("jwk", key);
-    return exported;
-  };
-
-  const importKey = async (jwk: JsonWebKey) => {
-    return window.crypto.subtle.importKey(
-      "jwk",
-      jwk,
-      {
-        name: "ECDH",
-        namedCurve: "P-256",
-      },
-      true,
-      []
-    );
-  };
-
-  const deriveSharedKey = async (privateKey: CryptoKey, publicKey: CryptoKey) => {
     return window.crypto.subtle.deriveKey(
       {
-        name: "ECDH",
-        public: publicKey,
+        name: "PBKDF2",
+        salt: encoder.encode("noteflow-group-chat-salt"),
+        iterations: 100000,
+        hash: "SHA-256"
       },
-      privateKey,
-      {
-        name: "AES-GCM",
-        length: 256,
-      },
+      keyMaterial,
+      { name: "AES-GCM", length: 256 },
       false,
       ["encrypt", "decrypt"]
     );
@@ -216,8 +259,9 @@ export const SocialTab = () => {
     }
   };
 
-  const joinRoom = async () => {
-    if (!roomId.trim() || !user) return;
+  const joinRoom = async (overrideRoomId?: string) => {
+    const targetRoom = overrideRoomId || roomId;
+    if (!targetRoom.trim() || !user) return;
     
     // Generate ephemeral key pair for this session
     const keyPair = await generateKeyPair();
@@ -229,7 +273,9 @@ export const SocialTab = () => {
     
     ws.onopen = () => {
       setIsConnected(true);
-      ws.send(JSON.stringify({ type: 'join', roomId }));
+      if (overrideRoomId) setRoomId(overrideRoomId);
+      
+      ws.send(JSON.stringify({ type: 'join', roomId: targetRoom }));
       
       // Broadcast public key to establish shared secret
       ws.send(JSON.stringify({
@@ -411,6 +457,20 @@ export const SocialTab = () => {
     await updateUser({ following: newFollowing });
   };
 
+  const handleStartDM = (targetUserId: string) => {
+    if (!user) return;
+    // Create a consistent room ID for the two users
+    const sortedIds = [user.id, targetUserId].sort();
+    const dmRoomId = `dm_${sortedIds[0]}_${sortedIds[1]}`;
+    setRoomId(dmRoomId);
+    setActiveView('chat');
+  };
+
+  const viewProfile = (userId: string) => {
+    setViewingProfileId(userId);
+    setActiveView('profile');
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -442,6 +502,7 @@ export const SocialTab = () => {
       {activeView === 'feed' ? (
         <div className="space-y-6">
           {/* Create Post Card */}
+
           <div className="bg-white dark:bg-neutral-800 rounded-2xl p-4 shadow-sm border border-neutral-200 dark:border-neutral-700">
             {!isCreatingPost ? (
               <div 
@@ -496,6 +557,31 @@ export const SocialTab = () => {
 
           {/* Filters & Trending */}
           <div className="flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                <input 
+                  type="text" 
+                  placeholder="Search posts..."
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 focus:ring-2 focus:ring-[var(--color-primary-500)] outline-none transition-all text-sm"
+                />
+              </div>
+              <div className="relative">
+                <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                <select
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value)}
+                  className="w-full sm:w-auto pl-9 pr-8 py-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 focus:ring-2 focus:ring-[var(--color-primary-500)] outline-none transition-all text-sm appearance-none"
+                >
+                  <option value="all">All Time</option>
+                  <option value="7days">Last 7 Days</option>
+                  <option value="30days">Last 30 Days</option>
+                </select>
+              </div>
+            </div>
+
             <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar">
               <button
                 onClick={() => {
@@ -592,18 +678,17 @@ export const SocialTab = () => {
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900 dark:to-purple-900 flex items-center justify-center text-indigo-700 dark:text-indigo-300 font-bold">
+                    <div 
+                      onClick={() => viewProfile(post.userId)}
+                      className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900 dark:to-purple-900 flex items-center justify-center text-indigo-700 dark:text-indigo-300 font-bold cursor-pointer hover:ring-2 hover:ring-indigo-300 transition-all"
+                    >
                       {post.authorName.charAt(0)}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
                         <h4 
                           className="font-semibold text-neutral-900 dark:text-neutral-100 cursor-pointer hover:underline"
-                          onClick={() => {
-                            setSelectedUserId(post.userId);
-                            setShowMyPostsOnly(false);
-                            setShowFollowingOnly(false);
-                          }}
+                          onClick={() => viewProfile(post.userId)}
                         >
                           {post.authorName}
                         </h4>
@@ -659,7 +744,13 @@ export const SocialTab = () => {
                     <MessageSquare size={18} />
                     {post.commentsCount}
                   </button>
-                  <button className="flex items-center gap-2 text-sm font-medium text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors ml-auto">
+                  <button 
+                    onClick={() => {
+                      setSelectedSharePostId(post.id);
+                      setShowShareModal(true);
+                    }}
+                    className="flex items-center gap-2 text-sm font-medium text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors ml-auto"
+                  >
                     <Share2 size={18} />
                   </button>
                 </div>
@@ -717,63 +808,108 @@ export const SocialTab = () => {
             ))}
           </div>
           </div>
-          </div>
-      ) : (
+        </div>
+      ) : activeView === 'chat' ? (
         // Chat View (Existing Logic)
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <motion.div 
-            className="lg:col-span-1 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 space-y-6"
+            className="lg:col-span-1 bg-white dark:bg-neutral-800 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-700 p-6 space-y-6 flex flex-col max-h-[600px] overflow-y-auto"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.4 }}
           >
-            <h3 className="text-lg font-semibold flex items-center gap-2">
-              <Shield size={20} className="text-[var(--color-primary-500)]" />
-              Secure Channel
-            </h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1 block">Room ID / Buddy Code</label>
-                <div className="relative">
-                  <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                  <input 
-                    type="text" 
-                    placeholder="Enter secret code..."
-                    value={roomId}
-                    onChange={(e) => setRoomId(e.target.value)}
-                    disabled={isConnected}
-                    className="w-full pl-9 pr-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 bg-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] outline-none transition-all text-sm"
-                  />
-                </div>
-              </div>
-              
-              {!isConnected ? (
-                <button 
-                  onClick={joinRoom}
-                  disabled={!roomId.trim()}
-                  className="w-full py-2 bg-[var(--color-primary-600)] text-white rounded-xl font-medium hover:bg-[var(--color-primary-700)] transition-colors disabled:opacity-50"
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Shield size={20} className="text-[var(--color-primary-500)]" />
+                Secure Channel
+              </h3>
+              {!isConnected && (
+                <button
+                  onClick={() => setIsCreatingGroup(!isCreatingGroup)}
+                  className="text-xs bg-[var(--color-primary-50)] text-[var(--color-primary-700)] dark:bg-[var(--color-primary-900)]/30 dark:text-[var(--color-primary-400)] px-2 py-1 rounded-lg hover:bg-[var(--color-primary-100)] transition-colors"
                 >
-                  Join Channel
-                </button>
-              ) : (
-                <button 
-                  onClick={() => {
-                    wsRef.current?.close();
-                    setIsConnected(false);
-                    setRoomId('');
-                    setMessages([]);
-                  }}
-                  className="w-full py-2 bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400 rounded-xl font-medium hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
-                >
-                  Leave Channel
+                  {isCreatingGroup ? 'Cancel' : '+ Group Chat'}
                 </button>
               )}
             </div>
+            
+            <div className="space-y-4">
+              {isCreatingGroup && !isConnected ? (
+                <div className="space-y-4 border border-[var(--color-primary-200)] dark:border-[var(--color-primary-800)] p-4 rounded-xl bg-[var(--color-primary-50)]/50 dark:bg-[var(--color-primary-900)]/10">
+                  <h4 className="text-sm font-medium">Select Buddies (Up to 4)</h4>
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                    {uniqueUsers?.map(u => (
+                      <div 
+                        key={u.id}
+                        onClick={() => toggleBuddySelection(u.id)}
+                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${selectedBuddies.includes(u.id) ? 'bg-[var(--color-primary-100)] dark:bg-[var(--color-primary-800)]' : 'hover:bg-neutral-100 dark:hover:bg-neutral-700'}`}
+                      >
+                         <div className="flex items-center gap-2">
+                           <div className="w-6 h-6 rounded-full bg-[var(--color-primary-200)] flex items-center justify-center text-xs font-bold text-[var(--color-primary-800)]">
+                             {u.avatar}
+                           </div>
+                           <span className="text-sm">{u.name}</span>
+                         </div>
+                         {selectedBuddies.includes(u.id) && <div className="w-2 h-2 rounded-full bg-[var(--color-primary-600)]" />}
+                      </div>
+                    ))}
+                    {uniqueUsers?.length === 0 && (
+                      <p className="text-xs text-neutral-500">No buddies found in feed.</p>
+                    )}
+                  </div>
+                  <button 
+                    onClick={createGroupChannel}
+                    disabled={selectedBuddies.length === 0}
+                    className="w-full py-2 bg-[var(--color-primary-600)] text-white rounded-xl font-medium hover:bg-[var(--color-primary-700)] transition-colors disabled:opacity-50"
+                  >
+                    Start Group Chat
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1 block">Room ID / Buddy Code</label>
+                    <div className="relative">
+                      <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                      <input 
+                        type="text" 
+                        placeholder="Enter secret code..."
+                        value={roomId}
+                        onChange={(e) => setRoomId(e.target.value)}
+                        disabled={isConnected}
+                        className="w-full pl-9 pr-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 bg-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] outline-none transition-all text-sm"
+                      />
+                    </div>
+                  </div>
+                  
+                  {!isConnected ? (
+                    <button 
+                      onClick={() => joinRoom()}
+                      disabled={!roomId.trim()}
+                      className="w-full py-2 bg-[var(--color-primary-600)] text-white rounded-xl font-medium hover:bg-[var(--color-primary-700)] transition-colors disabled:opacity-50"
+                    >
+                      Join Channel
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => {
+                        wsRef.current?.close();
+                        setIsConnected(false);
+                        setRoomId('');
+                        setMessages([]);
+                      }}
+                      className="w-full py-2 bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400 rounded-xl font-medium hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+                    >
+                      Leave Channel
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
 
-            <div className="pt-6 border-t border-neutral-200 dark:border-neutral-700">
+            <div className="pt-6 border-t border-neutral-200 dark:border-neutral-700 mt-auto">
                <p className="text-xs text-neutral-400 text-center">
-                 Share the Room ID securely with your buddy. Messages are end-to-end encrypted.
+                 Share the Room ID securely with your buddies. Messages are end-to-end encrypted.
                </p>
             </div>
           </motion.div>
@@ -809,8 +945,8 @@ export const SocialTab = () => {
                 messages.map((msg, index) => {
                   if (msg.isSystem) {
                     return (
-                      <div key={index} className="flex justify-center my-2">
-                        <span className="text-xs bg-neutral-100 dark:bg-neutral-800 text-neutral-500 px-3 py-1 rounded-full">
+                      <div key={index} className="flex justify-center my-4">
+                        <span className="text-xs bg-neutral-100 dark:bg-neutral-800 text-neutral-500 px-4 py-1.5 rounded-full shadow-sm border border-neutral-200 dark:border-neutral-700">
                           {msg.content}
                         </span>
                       </div>
@@ -819,16 +955,18 @@ export const SocialTab = () => {
                   
                   const isMe = msg.senderId === user?.id;
                   return (
-                    <div key={index} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${
-                        isMe 
-                          ? 'bg-[var(--color-primary-600)] text-white rounded-tr-none' 
-                          : 'bg-white dark:bg-neutral-700 text-neutral-800 dark:text-neutral-100 border border-neutral-200 dark:border-neutral-600 rounded-tl-none'
-                      }`}>
-                        <p className="text-sm">{msg.content}</p>
-                        <p className={`text-[10px] mt-1 ${isMe ? 'text-white/70' : 'text-neutral-400'}`}>
+                    <div key={index} className={`flex ${isMe ? 'justify-end' : 'justify-start'} group`}>
+                      <div className={`max-w-[75%] flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                        <div className={`px-4 py-2.5 shadow-sm relative ${
+                          isMe 
+                            ? 'bg-[var(--color-primary-600)] text-white rounded-2xl rounded-tr-sm' 
+                            : 'bg-white dark:bg-neutral-700 text-neutral-800 dark:text-neutral-100 border border-neutral-200 dark:border-neutral-600 rounded-2xl rounded-tl-sm'
+                        }`}>
+                          <p className="text-sm leading-relaxed">{msg.content}</p>
+                        </div>
+                        <span className={`text-[10px] mt-1 opacity-0 group-hover:opacity-100 transition-opacity ${isMe ? 'text-neutral-500 mr-1' : 'text-neutral-500 ml-1'}`}>
                           {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
+                        </span>
                       </div>
                     </div>
                   );
@@ -859,7 +997,177 @@ export const SocialTab = () => {
             </div>
           </motion.div>
         </div>
-      )}
+      ) : activeView === 'profile' && viewingProfileId ? (
+        <UserProfileView 
+          userId={viewingProfileId} 
+          onBack={() => setActiveView('feed')} 
+          onMessage={() => handleStartDM(viewingProfileId)}
+          onFollow={() => handleFollow(viewingProfileId)}
+          isFollowing={user?.following?.includes(viewingProfileId) || false}
+          isCurrentUser={user?.id === viewingProfileId}
+        />
+      ) : null}
+
+      <AnimatePresence>
+        {showShareModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-neutral-800 rounded-2xl w-full max-w-sm p-6 shadow-xl border border-neutral-200 dark:border-neutral-700"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <Share2 size={20} className="text-[var(--color-primary-500)]" />
+                  Share Post
+                </h3>
+                <button 
+                  onClick={() => setShowShareModal(false)}
+                  className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-4">
+                Anyone with the link will be able to view this post. You can optionally protect it with a password.
+              </p>
+              
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2 block">Password (Optional)</label>
+                  <div className="relative">
+                    <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                    <input 
+                      type="password" 
+                      placeholder="Leave blank for public link..."
+                      value={sharePassword}
+                      onChange={(e) => setSharePassword(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 focus:ring-2 focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] outline-none transition-all text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowShareModal(false)}
+                  className="flex-1 px-4 py-2 rounded-xl text-sm font-medium border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={generatePostShareLink}
+                  className="flex-1 px-4 py-2 bg-[var(--color-primary-600)] text-white rounded-xl text-sm font-medium hover:bg-[var(--color-primary-700)] transition-colors"
+                >
+                  Generate Link
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
+  );
+};
+
+// Sub-component for User Profile View
+const UserProfileView = ({ userId, onBack, onMessage, onFollow, isFollowing, isCurrentUser }: any) => {
+  const profilePosts = useLiveQuery(
+    () => db.posts.where('userId').equals(userId).reverse().sortBy('createdAt'),
+    [userId]
+  );
+
+  // Derive basic profile info from their posts (since we don't sync full user profiles in this local-first demo)
+  const profileName = profilePosts && profilePosts.length > 0 ? profilePosts[0].authorName : 'Unknown User';
+  const totalLikes = profilePosts?.reduce((sum, post) => sum + post.likes.length, 0) || 0;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
+      <button 
+        onClick={onBack}
+        className="flex items-center gap-2 text-sm font-medium text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
+      >
+        ← Back to Feed
+      </button>
+
+      <div className="bg-white dark:bg-neutral-800 rounded-3xl p-8 shadow-sm border border-neutral-200 dark:border-neutral-700 text-center relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 dark:from-indigo-500/10 dark:to-purple-500/10"></div>
+        
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900 dark:to-purple-900 flex items-center justify-center text-indigo-700 dark:text-indigo-300 text-3xl font-bold border-4 border-white dark:border-neutral-800 shadow-lg mb-4">
+            {profileName.charAt(0)}
+          </div>
+          <h3 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-1">{profileName}</h3>
+          <p className="text-sm text-neutral-500 mb-6">Recovery Community Member</p>
+
+          <div className="flex items-center justify-center gap-8 mb-8">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{profilePosts?.length || 0}</p>
+              <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Posts</p>
+            </div>
+            <div className="w-px h-8 bg-neutral-200 dark:bg-neutral-700"></div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{totalLikes}</p>
+              <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Likes Received</p>
+            </div>
+          </div>
+
+          {!isCurrentUser && (
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={onFollow}
+                className={`px-6 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                  isFollowing
+                    ? 'bg-neutral-100 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300'
+                    : 'bg-[var(--color-primary-600)] text-white hover:bg-[var(--color-primary-700)] shadow-lg shadow-[var(--color-primary-600)]/20'
+                }`}
+              >
+                {isFollowing ? 'Following' : 'Follow'}
+              </button>
+              <button 
+                onClick={onMessage}
+                className="flex items-center gap-2 px-6 py-2.5 bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700 rounded-xl text-sm font-medium transition-all shadow-sm"
+              >
+                <MessageCircle size={18} />
+                Message
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <h4 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <UserIcon size={20} className="text-[var(--color-primary-500)]" />
+          Recent Activity
+        </h4>
+        <div className="space-y-4">
+          {profilePosts?.length === 0 ? (
+            <p className="text-center py-8 text-neutral-500">No posts yet.</p>
+          ) : (
+            profilePosts?.map(post => (
+              <div key={post.id} className="bg-white dark:bg-neutral-800 rounded-2xl p-6 shadow-sm border border-neutral-200 dark:border-neutral-700">
+                <p className="text-xs text-neutral-500 mb-3">{formatDistanceToNow(new Date(post.createdAt))} ago</p>
+                <p className="text-neutral-700 dark:text-neutral-300 mb-3 whitespace-pre-wrap">{post.content}</p>
+                {post.tags && post.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {post.tags.map((tag, i) => (
+                      <span key={i} className="text-xs font-medium text-[var(--color-primary-600)] bg-[var(--color-primary-50)] dark:bg-[var(--color-primary-900)]/30 px-2 py-1 rounded-full">
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </motion.div>
   );
 };

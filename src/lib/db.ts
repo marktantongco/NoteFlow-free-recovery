@@ -15,6 +15,9 @@ export interface User {
   currentStreak: number;
   lastCheckInDate?: string;
   following?: string[]; // Array of userIds this user follows
+  dailySpend?: number;
+  currency?: string;
+  recoveryStartDate?: string;
 }
 
 export interface CustomJournalPrompt {
@@ -62,14 +65,34 @@ export interface NoteDocument {
   updatedAt: string;
   folderId: string | null;
   order: number;
-  tags?: string[];
+  tags: string[];
+  permissions?: 'read-only' | 'collaborative'; 
 }
 
 export interface Folder {
   id: string;
   userId: string;
+  parentId: string | null; 
   name: string;
   createdAt: string;
+  order: number; 
+  permissions?: 'read-only' | 'collaborative';
+}
+
+export interface NoteVersion {
+  id: string;
+  noteId: string;
+  content: string;
+  title: string;
+  timestamp: string;
+  userId: string;
+}
+
+export interface FolderPermission {
+  id: string;
+  folderId: string;
+  userId: string;
+  accessType: 'edit' | 'comment-only' | 'owner';
 }
 
 export interface MeditationCompletion {
@@ -90,6 +113,8 @@ export interface Habit {
   category?: string;
   icon?: string;
   createdAt: string;
+  costImpact?: number; // Cost of habit (if substance) or savings (if health)
+  timeImpact?: number; // Time in minutes saved/spent
 }
 
 export interface HabitLog {
@@ -134,20 +159,37 @@ const db = new Dexie('NoteFlowRecoveryDB') as Dexie & {
   posts: EntityTable<SocialPost, 'id'>;
   comments: EntityTable<SocialComment, 'id'>;
   customPrompts: EntityTable<CustomJournalPrompt, 'id'>;
+  auditLogs: EntityTable<AuditLog, 'id'>;
+  noteVersions: EntityTable<NoteVersion, 'id'>;
+  folderPermissions: EntityTable<FolderPermission, 'id'>;
 };
 
-db.version(7).stores({
+export interface AuditLog {
+  id: string;
+  userId: string;
+  targetId: string; // e.g., folderId or noteId
+  targetType: 'note' | 'folder';
+  action: 'create' | 'update' | 'delete';
+  timestamp: string;
+}
+
+// ...
+
+db.version(10).stores({
   users: 'id, email',
   entries: 'id, userId, date',
   logs: 'id, userId, timestamp',
   notes: 'id, userId, folderId, *tags',
-  folders: 'id, userId',
+  folders: 'id, userId, parentId',
   meditations: 'id, userId, sessionId',
   habits: 'id, userId, category',
   habitLogs: 'id, userId, habitId, date',
   posts: 'id, userId, createdAt, *tags',
   comments: 'id, postId, userId, createdAt',
-  customPrompts: 'id, userId, createdAt'
+  customPrompts: 'id, userId, createdAt',
+  auditLogs: 'id, targetId, targetType, userId',
+  noteVersions: 'id, noteId, timestamp',
+  folderPermissions: 'id, folderId, userId'
 });
 
 export { db };

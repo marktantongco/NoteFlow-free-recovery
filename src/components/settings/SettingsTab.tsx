@@ -15,6 +15,8 @@ const THEMES = [
   { id: 'amber', name: 'Amber', color: '#f59e0b' },
 ];
 
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'PHP'];
+
 export const SettingsTab = () => {
   const { user, logout } = useAppContext();
   const [themeMode, setThemeMode] = useState(() => {
@@ -23,6 +25,13 @@ export const SettingsTab = () => {
     return 'light';
   });
   const [activeTheme, setActiveTheme] = useState(() => localStorage.getItem('themeColor') || 'emerald');
+  const [currency, setCurrency] = useState(user?.currency || 'USD');
+
+  const updateCurrency = async (newCurrency: string) => {
+    if (!user) return;
+    setCurrency(newCurrency);
+    await db.users.update(user.id, { currency: newCurrency });
+  };
   const [showExportReminder, setShowExportReminder] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -211,6 +220,54 @@ export const SettingsTab = () => {
           </h3>
           
           <div className="space-y-6">
+            <div className="border-b border-neutral-200 dark:border-neutral-700 pb-6 mb-6">
+              <h4 className="font-semibold mb-4 text-neutral-800 dark:text-neutral-200">Recovery Baseline</h4>
+              
+              <div className="space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                  <div>
+                    <label className="text-sm font-medium">Recovery Start Date</label>
+                    <p className="text-xs text-neutral-500">Used for biochemical timeline & milestones</p>
+                  </div>
+                  <input 
+                    type="date" 
+                    value={user?.recoveryStartDate || ''}
+                    onChange={(e) => {
+                      if (user) db.users.update(user.id, { recoveryStartDate: e.target.value });
+                    }}
+                    className="px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] outline-none text-sm"
+                  />
+                </div>
+
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                  <div>
+                    <label className="text-sm font-medium">Daily Spend on Substances</label>
+                    <p className="text-xs text-neutral-500">Used to calculate total money saved</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={currency}
+                      onChange={(e) => updateCurrency(e.target.value)}
+                      className="px-2 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] outline-none text-sm"
+                    >
+                      {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <input 
+                      type="number" 
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={user?.dailySpend || ''}
+                      onChange={(e) => {
+                        if (user) db.users.update(user.id, { dailySpend: parseFloat(e.target.value) || 0 });
+                      }}
+                      className="w-24 px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-transparent focus:ring-2 focus:ring-[var(--color-primary-500)] outline-none text-sm text-right"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium">Theme Mode</p>

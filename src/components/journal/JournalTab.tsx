@@ -10,6 +10,7 @@ import { motion } from 'motion/react';
 import { Activity, Brain, Heart, Save, Mic, MicOff, Sparkles, X, RefreshCw, Lightbulb, Flame, Book } from 'lucide-react';
 import { isToday, isYesterday, parseISO, format } from 'date-fns';
 import { DEVOTIONALS, Devotional } from '../../constants/devotionals';
+import { toast } from 'sonner';
 
 const PROMPTS = [
   "What are you grateful for today?",
@@ -73,6 +74,9 @@ export const JournalTab = () => {
   const [isLoadingAffirmation, setIsLoadingAffirmation] = useState(false);
   const [isCreatingPrompt, setIsCreatingPrompt] = useState(false);
   const [newPromptText, setNewPromptText] = useState('');
+  
+  const [aiCopingStrategies, setAiCopingStrategies] = useState<string[]>([]);
+  const [isGeneratingStrategies, setIsGeneratingStrategies] = useState(false);
 
   const customPrompts = useLiveQuery(
     () => user ? db.customPrompts.where('userId').equals(user.id).toArray() : [],
@@ -135,9 +139,23 @@ export const JournalTab = () => {
     }
   };
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (currentMood !== undefined && currentCraving !== undefined) {
+        generateStarters();
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [currentMood, currentCraving]);
+
   const generateStarters = async () => {
     setIsGeneratingStarters(true);
     try {
+      let recentHabits: any[] = [];
+      if (user) {
+        recentHabits = await db.habitLogs.where('userId').equals(user.id).reverse().limit(5).toArray();
+      }
+
       const response = await fetch('/api/journal-starters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -145,17 +163,48 @@ export const JournalTab = () => {
           mood: currentMood,
           moodLabel: selectedMoodLabel,
           cravingLevel: currentCraving,
-          recentHabits: [] // Simplified for now
+          recentHabits
         })
       });
       if (response.ok) {
         const data = await response.json();
         setAiStarters(data.starters || []);
+      } else if (response.status === 401) {
+        toast.error("Invalid AI API Key. Please check your settings.");
       }
     } catch (error) {
       console.error("Failed to generate starters", error);
     } finally {
       setIsGeneratingStarters(false);
+    }
+  };
+
+  const generateCopingStrategies = async () => {
+    if (!user) return;
+    setIsGeneratingStrategies(true);
+    try {
+      const entries = await db.entries.where('userId').equals(user.id).reverse().limit(10).toArray();
+      const logs = await db.logs.where('userId').equals(user.id).reverse().limit(10).toArray();
+      
+      const response = await fetch('/api/insights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entries,
+          logs,
+          analysisType: 'suggestions'
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAiCopingStrategies(data.suggestions || []);
+      } else if (response.status === 401) {
+        toast.error("Invalid AI API Key. Please check your settings.");
+      }
+    } catch (e) {
+      console.error("Failed to generate coping strategies", e);
+    } finally {
+      setIsGeneratingStrategies(false);
     }
   };
 
@@ -520,9 +569,45 @@ export const JournalTab = () => {
         </div>
 
         <div className="space-y-4">
-          <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-            Coping Strategies Used (comma separated)
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+              Coping Strategies Used (comma separated)
+            </label>
+            <button
+              type="button"
+              onClick={generateCopingStrategies}
+              disabled={isGeneratingStrategies}
+              className="flex items-center gap-1 text-xs font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 px-3 py-1.5 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors disabled:opacity-50"
+            >
+              <Sparkles size={14} />
+              {isGeneratingStrategies ? 'Loading...' : 'AI Suggestions'}
+            </button>
+          </div>
+          
+          {aiCopingStrategies.length > 0 && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex flex-wrap gap-2 mb-2 p-3 bg-emerald-50/50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800/50 rounded-xl"
+            >
+              <span className="w-full text-xs font-medium text-emerald-700 dark:text-emerald-400 mb-1">Suggested for you:</span>
+              {aiCopingStrategies.map((strategy, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => {
+                    const current = watch('copingStrategies');
+                    setValue('copingStrategies', current ? `${current}, ${strategy}` : strategy);
+                    setAiCopingStrategies(aiCopingStrategies.filter(s => s !== strategy));
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-full bg-white dark:bg-neutral-800 border border-emerald-200 dark:border-emerald-700/50 text-neutral-700 dark:text-neutral-300 hover:border-emerald-400 transition-colors shadow-sm"
+                >
+                  + {strategy}
+                </button>
+              ))}
+            </motion.div>
+          )}
+
           <input 
             type="text" 
             placeholder="e.g., meditation, calling a friend, exercise"

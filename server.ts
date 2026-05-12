@@ -23,7 +23,20 @@ async function startServer() {
       
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       
-      const prompt = `Analyze the following substance use recovery data for a user.
+      let prompt = '';
+      if (analysisType === 'suggestions') {
+        prompt = `You are a specialized AI recovery assistant. Based on the user's recent recovery entries and substance logs, generate 3-5 highly actionable, personalized coping strategies to help them manage cravings and avoid triggers. 
+
+Dataset:
+Entries: ${JSON.stringify(entries?.slice(-10) || [], null, 2)}
+Logs: ${JSON.stringify(logs?.slice(-10) || [], null, 2)}
+
+Output JSON Structure:
+{
+  "suggestions": ["Strategy 1", "Strategy 2", "Strategy 3"]
+}`;
+      } else {
+        prompt = `Analyze the following substance use recovery data for a user.
 Analysis Focus: ${analysisType || 'General Overview'}
 
 Data Context:
@@ -57,9 +70,10 @@ Output JSON Structure:
   "recommendations": ["Action 1", "Action 2"]
 }
 `;
+      }
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -72,9 +86,17 @@ Output JSON Structure:
       } else {
         res.status(500).json({ error: "Failed to generate insights" });
       }
-    } catch (error) {
-      console.error("AI Insight Error:", error);
-      res.status(500).json({ error: "Internal server error" });
+    } catch (error: any) {
+      const errorStr = typeof error === 'string' ? error : (error instanceof Error ? error.message : JSON.stringify(error));
+      
+      if (errorStr && (errorStr.includes('API key not valid') || errorStr.includes('API_KEY_INVALID'))) {
+        // Suppress massive stack trace or JSON object logging to console for known configuration errors
+        console.warn("AI Insight Warning: Invalid API Key. Configure a valid key in AI Studio settings.");
+        res.status(401).json({ error: "Invalid API Key. Please check your AI Studio settings." });
+      } else {
+        console.error("AI Insight Error:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
     }
   });
 
@@ -101,7 +123,7 @@ Output JSON Structure:
 `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -114,10 +136,48 @@ Output JSON Structure:
       } else {
         res.status(500).json({ error: "Failed to generate starters" });
       }
-    } catch (error) {
-      console.error("AI Starter Error:", error);
-      res.status(500).json({ error: "Internal server error" });
+    } catch (error: any) {
+      const errorStr = typeof error === 'string' ? error : (error instanceof Error ? error.message : JSON.stringify(error));
+      
+      if (errorStr && (errorStr.includes('API key not valid') || errorStr.includes('API_KEY_INVALID'))) {
+        console.warn("AI Starter Warning: Invalid API Key. Configure a valid key in AI Studio settings.");
+        res.status(401).json({ error: "Invalid API Key. Please check your AI Studio settings." });
+      } else {
+        console.error("AI Starter Error:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
     }
+  });
+
+  // Optimized for OG meta-tags
+  app.get("/share/post/:postId", async (req, res) => {
+    const { postId } = req.params;
+    // In a real production app, you would fetch from DB here:
+    // const post = await db.posts.get(postId);
+    const post = {
+      authorName: "Recovery Community",
+      content: "Check out this inspiring recovery post!"
+    };
+
+    const imageUrl = `https://og.image.sh/api?title=${encodeURIComponent(post.authorName)}&description=${encodeURIComponent(post.content)}`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta property="og:title" content="Shared Post from Recovery App" />
+          <meta property="og:description" content="${post.content.substring(0, 100)}..." />
+          <meta property="og:image" content="${imageUrl}" />
+          <meta property="og:type" content="article" />
+          <meta property="og:site_name" content="NoteFlow Recovery" />
+          <title>Shared Post</title>
+        </head>
+        <body>
+          <script>window.location.href = '/';</script>
+        </body>
+      </html>
+    `;
+    res.send(html);
   });
 
   // Vite middleware for development
@@ -148,7 +208,7 @@ Output JSON Structure:
         const data = JSON.parse(message.toString());
 
         if (data.type === 'join') {
-          const { roomId } = data;
+          const { roomId, userId, userName } = data;
           if (currentRoom) {
             rooms.get(currentRoom)?.delete(ws);
           }
@@ -158,12 +218,14 @@ Output JSON Structure:
           }
           rooms.get(roomId)?.add(ws);
           
-          // Notify others in room
+          // Notify others in room of new user
           rooms.get(roomId)?.forEach(client => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
               client.send(JSON.stringify({
-                type: 'system',
-                content: 'A buddy has joined the chat.'
+                type: 'presence',
+                userId,
+                userName,
+                status: 'joined'
               }));
             }
           });
@@ -189,6 +251,18 @@ Output JSON Structure:
                   content: data.content, // Encrypted content
                   senderId: data.senderId,
                   timestamp: new Date().toISOString()
+                }));
+              }
+            });
+          }
+        } else if (data.type === 'audit_update') {
+          if (currentRoom && rooms.has(currentRoom)) {
+            rooms.get(currentRoom)?.forEach(client => {
+              if (client !== ws && client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({
+                  type: 'audit_update',
+                  targetId: data.targetId,
+                  content: data.content
                 }));
               }
             });
